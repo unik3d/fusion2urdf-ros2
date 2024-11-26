@@ -67,9 +67,10 @@ def generate_launch_description():
 gazebo_launch = """from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 import os
 import xacro
 from ament_index_python.packages import get_package_share_directory
@@ -81,8 +82,25 @@ def generate_launch_description():
     xacro_file = os.path.join(share_dir, 'urdf', '%s.xacro')
     robot_description_config = xacro.process_file(xacro_file)
     robot_urdf = robot_description_config.toxml()
+    
+    # World
 
-    robot_state_publisher_node = Node(
+    default_world = os.path.join(
+        share_dir,
+        'worlds',
+        'empty.world'
+    )
+
+    world = LaunchConfiguration('world')
+    world_arg = DeclareLaunchArgument(
+        'world',
+        default_value=default_world,
+        description='World to load'
+    )
+
+    # State Publisher
+
+    robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
         name='robot_state_publisher',
@@ -91,51 +109,51 @@ def generate_launch_description():
         ]
     )
 
-    joint_state_publisher_node = Node(
+    joint_state_publisher = Node(
         package='joint_state_publisher',
         executable='joint_state_publisher',
         name='joint_state_publisher'
     )
 
-    gazebo_server = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            PathJoinSubstitution([
-                FindPackageShare('gazebo_ros'),
-                'launch',
-                'gzserver.launch.py'
-            ])
-        ]),
-        launch_arguments={
-            'pause': 'true'
+    # Gazebo
+
+    gazebo_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([os.path.join(
+            get_package_share_directory('ros_gz_sim'),
+            'launch',
+            'gz_sim.launch.py'
+        )]), launch_arguments={
+            'gz_args': ['-r -v4 ', world],
+            'on exit shutdown': 'true'
         }.items()
     )
 
-    gazebo_client = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            PathJoinSubstitution([
-                FindPackageShare('gazebo_ros'),
-                'launch',
-                'gzclient.launch.py'
-            ])
-        ])
-    )
+    gazebo_spawn_entity = Node(
+        package='ros_gz_sim',
+        executable='create',
+        arguments=['-topic', 'robot_description',
+                   '-name', '%s',
+                   '-z', '0.5'],
+        output='screen')
 
-    urdf_spawn_node = Node(
-        package='gazebo_ros',
-        executable='spawn_entity.py',
+    gazebo_bridge_params = os.path.join(share_dir, 'config', 'gz_bridge.yaml')
+    gazebo_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
         arguments=[
-            '-entity', '%s',
-            '-topic', 'robot_description'
-        ],
-        output='screen'
+            '--ros-args',
+            '-p',
+            f'config_file:={gazebo_bridge_params}',
+        ]
     )
 
     return LaunchDescription([
-        robot_state_publisher_node,
-        joint_state_publisher_node,
-        gazebo_server,
-        gazebo_client,
-        urdf_spawn_node,
+        robot_state_publisher,
+        joint_state_publisher,
+        world_arg,
+        gazebo_launch,
+        gazebo_spawn_entity,
+        gazebo_bridge,
     ])
 """
 
